@@ -1,0 +1,2205 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PriceIQ — Gestão de Precificação</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<!-- ============================================================
+     FIREBASE — cole suas credenciais abaixo e não mexa mais
+     ============================================================ -->
+<script type="module">
+import { initializeApp }                          from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc,
+         collection, getDocs, deleteDoc,
+         serverTimestamp }                         from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ⚙️  SUBSTITUA pelos valores do seu projeto Firebase:
+const firebaseConfig = {
+  apiKey:            "AIzaSyCRAQws_QXKNgoPo1Ez41NzHbPwn901ftE",
+  authDomain:        "precificacao-dda98.firebaseapp.com",
+  projectId:         "precificacao-dda98",
+  storageBucket:     "precificacao-dda98.firebasestorage.app",
+  messagingSenderId: "816577705019",
+  appId:             "1:816577705019:web:262432b1c9c8adb5e9981e"
+};
+
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
+
+// ── Salva configurações no Firestore ──────────────────────────
+async function fbSalvarConfig(cfg) {
+  try {
+    await setDoc(doc(db, 'app', 'config'), { ...cfg, _ts: serverTimestamp() });
+  } catch(e) { console.warn('[Firebase] salvarConfig:', e.message); }
+}
+
+// ── Carrega configurações do Firestore ────────────────────────
+async function fbCarregarConfig() {
+  try {
+    const snap = await getDoc(doc(db, 'app', 'config'));
+    return snap.exists() ? snap.data() : null;
+  } catch(e) { console.warn('[Firebase] carregarConfig:', e.message); return null; }
+}
+
+// ── Salva lista completa de produtos ─────────────────────────
+async function fbSalvarProdutos(lista) {
+  try {
+    await setDoc(doc(db, 'app', 'produtos'), { lista, _ts: serverTimestamp() });
+  } catch(e) { console.warn('[Firebase] salvarProdutos:', e.message); }
+}
+
+// ── Carrega lista de produtos ─────────────────────────────────
+async function fbCarregarProdutos() {
+  try {
+    const snap = await getDoc(doc(db, 'app', 'produtos'));
+    return snap.exists() ? (snap.data().lista || []) : null;
+  } catch(e) { console.warn('[Firebase] carregarProdutos:', e.message); return null; }
+}
+
+// Expõe para o escopo global
+window._fb = { fbSalvarConfig, fbCarregarConfig, fbSalvarProdutos, fbCarregarProdutos };
+window.dispatchEvent(new Event('firebase-ready'));
+</script>
+<!-- ============================================================ -->
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #000;
+    --bg2:       #0a0a0a;
+    --bg3:       #111;
+    --bg4:       #1a1a1a;
+    --bg5:       #222;
+    --border:    rgba(255,255,255,0.06);
+    --border2:   rgba(255,255,255,0.1);
+
+    --cyan:    #00f5ff;
+    --purple:  #bf5af2;
+    --pink:    #ff2d78;
+    --green:   #39ff6e;
+    --orange:  #ff6a00;
+    --yellow:  #ffd60a;
+    --red:     #ff453a;
+
+    --text:    #f5f5f7;
+    --text2:   #6e6e73;
+    --text3:   #3a3a3c;
+
+    --sidebar-w: 220px;
+    --radius:    12px;
+    --radius-sm: 8px;
+    --font:      'Space Grotesk', sans-serif;
+    --font-mono: 'Space Mono', monospace;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ========== SIDEBAR ========== */
+  .sidebar {
+    position:fixed; left:0; top:0; bottom:0;
+    width:var(--sidebar-w);
+    background:var(--bg2);
+    border-right:1px solid var(--border);
+    display:flex; flex-direction:column;
+    z-index:100;
+  }
+
+  .logo { padding:24px 20px 20px; border-bottom:1px solid var(--border); }
+  .logo-inner { display:flex; align-items:center; gap:10px; }
+
+  .logo-icon {
+    width:30px; height:30px; border-radius:7px;
+    background:var(--cyan);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; font-size:14px;
+  }
+
+  .logo-text h1 {
+    font-family:var(--font); font-size:16px; font-weight:700;
+    letter-spacing:-0.5px; line-height:1; color:var(--text);
+  }
+  .logo-text h1 span { color:var(--cyan); }
+  .logo-text small { color:var(--text3); font-size:9px; letter-spacing:2px; text-transform:uppercase; }
+
+  .nav-section { padding:14px 10px; flex:1; }
+
+  .nav-label {
+    color:var(--text3); font-size:9px; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase; padding:0 10px 8px;
+  }
+
+  .nav-item {
+    display:flex; align-items:center; gap:10px;
+    padding:9px 10px; border-radius:var(--radius-sm);
+    cursor:pointer; transition:all 0.15s; margin-bottom:2px;
+    color:var(--text2); font-size:13px; font-weight:500;
+    user-select:none; position:relative;
+  }
+  .nav-item:hover { background:rgba(255,255,255,0.04); color:var(--text); }
+  .nav-item.active { background:rgba(0,245,255,0.06); color:var(--cyan); border:1px solid rgba(0,245,255,0.12); }
+  .nav-item.active .nav-icon-wrap { background:var(--cyan); color:#000; }
+
+  .nav-icon-wrap {
+    width:26px; height:26px; border-radius:6px;
+    background:var(--bg4); display:flex; align-items:center;
+    justify-content:center; font-size:13px; flex-shrink:0; transition:all 0.15s;
+  }
+
+  .sidebar-footer {
+    padding:14px 20px; border-top:1px solid var(--border);
+    font-size:10px; color:var(--text3);
+  }
+  .sidebar-footer strong { color:var(--text2); display:block; font-weight:600; font-size:11px; margin-bottom:2px; }
+
+  .online-dot {
+    display:inline-block; width:5px; height:5px; border-radius:50%;
+    background:var(--green); margin-right:4px; box-shadow:0 0 6px var(--green);
+  }
+
+  /* ========== TOPBAR ========== */
+  .topbar {
+    position:fixed; top:0; left:var(--sidebar-w); right:0;
+    height:54px; background:rgba(0,0,0,0.92);
+    backdrop-filter:blur(20px); border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 32px; z-index:90;
+  }
+  .topbar-title { font-family:var(--font); font-size:12px; font-weight:600; color:var(--text2); letter-spacing:0.5px; }
+  .topbar-title span { color:var(--text); }
+  .topbar-right { display:flex; align-items:center; gap:10px; }
+  .topbar-badge {
+    display:flex; align-items:center; gap:6px;
+    background:var(--bg3); border:1px solid var(--border2); border-radius:20px;
+    padding:4px 12px; font-size:11px; font-weight:600; color:var(--text2);
+  }
+  .topbar-badge .dot { width:5px; height:5px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); }
+
+  /* ========== MAIN ========== */
+  .main { margin-left:var(--sidebar-w); padding-top:54px; min-height:100vh; }
+  .page-inner { padding:26px 30px; }
+  .page { display:none; animation:fadeIn 0.2s ease; }
+  .page.active { display:block; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+
+  /* ========== PAGE HEADER ========== */
+  .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; }
+  .page-header-left h2 {
+    font-family:var(--font); font-size:20px; font-weight:700;
+    letter-spacing:-0.5px; color:var(--text);
+  }
+  .page-header-left p { color:var(--text3); font-size:11px; margin-top:3px; }
+  .page-header-tag {
+    background:var(--bg3); border:1px solid var(--border2); border-radius:20px;
+    padding:4px 12px; font-size:10px; font-weight:600; color:var(--text2);
+    letter-spacing:0.5px; white-space:nowrap;
+  }
+
+  /* ========== SECTION LABEL ========== */
+  .section-label {
+    display:flex; align-items:center; gap:8px; margin-bottom:12px;
+    font-size:9px; font-weight:700; letter-spacing:2.5px; text-transform:uppercase; color:var(--text3);
+  }
+  .section-label .dot { width:3px; height:14px; border-radius:2px; }
+  .section-label.cyan  { color:var(--cyan); }
+  .section-label.cyan  .dot { background:var(--cyan); box-shadow:0 0 6px var(--cyan); }
+  .section-label.green { color:var(--green); }
+  .section-label.green .dot { background:var(--green); }
+  .section-label.pink  { color:var(--pink); }
+  .section-label.pink  .dot { background:var(--pink); }
+
+  /* ========== KPI CARDS ========== */
+  .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; }
+
+  .kpi-card {
+    background:var(--bg2); border:1px solid var(--border);
+    border-radius:var(--radius); padding:18px 20px;
+    position:relative; overflow:hidden; cursor:default; transition:border-color 0.2s, transform 0.15s;
+  }
+  .kpi-card:hover { transform:translateY(-2px); }
+  .kpi-card.kpi-blue   { border-top:2px solid var(--cyan); }
+  .kpi-card.kpi-purple { border-top:2px solid var(--purple); }
+  .kpi-card.kpi-teal   { border-top:2px solid var(--green); }
+  .kpi-card.kpi-red    { border-top:2px solid var(--red); }
+
+  .kpi-glow {
+    position:absolute; top:0; right:-10px; width:60px; height:60px;
+    border-radius:50%; opacity:0.12; filter:blur(20px); pointer-events:none;
+  }
+  .kpi-blue   .kpi-glow { background:var(--cyan); }
+  .kpi-purple .kpi-glow { background:var(--purple); }
+  .kpi-teal   .kpi-glow { background:var(--green); }
+  .kpi-red    .kpi-glow { background:var(--red); }
+
+  .kpi-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+
+  .kpi-icon-box {
+    width:32px; height:32px; border-radius:8px;
+    display:flex; align-items:center; justify-content:center; font-size:14px;
+  }
+  .kpi-blue   .kpi-icon-box { background:rgba(0,245,255,0.08); }
+  .kpi-purple .kpi-icon-box { background:rgba(191,90,242,0.08); }
+  .kpi-teal   .kpi-icon-box { background:rgba(57,255,110,0.08); }
+  .kpi-red    .kpi-icon-box { background:rgba(255,69,58,0.08); }
+
+  .kpi-chip {
+    font-size:9px; font-weight:700; padding:2px 7px;
+    border-radius:4px; letter-spacing:1px; text-transform:uppercase; font-family:var(--font-mono);
+  }
+  .kpi-blue   .kpi-chip { background:rgba(0,245,255,0.08); color:var(--cyan); }
+  .kpi-purple .kpi-chip { background:rgba(191,90,242,0.08); color:var(--purple); }
+  .kpi-teal   .kpi-chip { background:rgba(57,255,110,0.08); color:var(--green); }
+  .kpi-red    .kpi-chip { background:rgba(255,69,58,0.08); color:var(--red); }
+
+  .kpi-value {
+    font-family:var(--font-mono); font-size:28px; font-weight:700;
+    line-height:1; margin-bottom:4px; letter-spacing:-1px;
+  }
+  .kpi-blue   .kpi-value { color:var(--cyan); }
+  .kpi-purple .kpi-value { color:var(--purple); }
+  .kpi-teal   .kpi-value { color:var(--green); }
+  .kpi-red    .kpi-value { color:var(--red); }
+
+  .kpi-label { font-size:11px; color:var(--text2); font-weight:500; }
+  .kpi-sub   { font-size:10px; color:var(--text3); margin-top:2px; }
+
+  .kpi-bar { margin-top:14px; height:2px; border-radius:2px; background:rgba(255,255,255,0.04); overflow:hidden; }
+  .kpi-bar-fill { height:100%; border-radius:2px; }
+  .kpi-blue   .kpi-bar-fill { background:var(--cyan); width:72%; }
+  .kpi-purple .kpi-bar-fill { background:var(--purple); width:58%; }
+  .kpi-teal   .kpi-bar-fill { background:var(--green); }
+  .kpi-red    .kpi-bar-fill { background:var(--red); }
+
+  /* ========== CHART CARDS ========== */
+  .charts-grid { display:grid; grid-template-columns:1fr 1.65fr; gap:18px; margin-bottom:18px; }
+
+  .chart-card {
+    background: #000;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+  }
+
+  .chart-card-header {
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:18px;
+  }
+
+  .chart-card-header h3 {
+    font-family:var(--font);
+    font-size:13px; font-weight:700;
+    letter-spacing:1.5px; color:#fff;
+    text-transform:uppercase;
+  }
+
+  .chart-dot { width:7px; height:7px; border-radius:50%; }
+
+  /* ========== ALERT BAND ========== */
+  .alert-band {
+    background:linear-gradient(90deg, rgba(255,71,87,0.1), rgba(255,71,87,0.03));
+    border:1px solid rgba(255,71,87,0.25);
+    border-left:3px solid var(--red);
+    border-radius:var(--radius-sm);
+    padding:13px 18px;
+    display:flex; align-items:center; gap:12px;
+    margin-bottom:18px;
+    font-size:13px; color:var(--text2);
+  }
+
+  .alert-band strong { color:var(--red); }
+
+  /* ========== RISK LIST ========== */
+  .risk-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+
+  .risk-item {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:11px 16px;
+    background:var(--bg2);
+    border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    border-left:3px solid transparent;
+    transition:background 0.2s;
+  }
+  .risk-item:hover { background:var(--bg3); }
+  .risk-item.neg { border-left-color:var(--red); }
+  .risk-item.low { border-left-color:var(--yellow); }
+
+  .risk-name { font-size:12px; color:var(--text2); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-right:12px; font-weight:600; }
+  .risk-margin { font-size:13px; font-weight:800; white-space:nowrap; }
+  .risk-margin.neg { color:var(--red); }
+  .risk-margin.low { color:var(--yellow); }
+
+  /* ========== TABLE ========== */
+  .table-controls {
+    display:flex; gap:10px; margin-bottom:14px;
+    align-items:center; flex-wrap:wrap;
+  }
+
+  .search-box { flex:1; min-width:200px; position:relative; }
+
+  .search-box input {
+    width:100%;
+    background:var(--bg2);
+    border:1px solid var(--border2);
+    border-radius:var(--radius-sm);
+    padding:10px 16px 10px 38px;
+    color:var(--text);
+    font-family:var(--font);
+    font-size:13px; font-weight:600;
+    outline:none;
+    transition:border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .search-box input:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(0,212,255,0.1); }
+  .search-box::before { content:'🔍'; position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:13px; }
+
+  .filter-select {
+    background:var(--bg2);
+    border:1px solid var(--border2);
+    border-radius:var(--radius-sm);
+    padding:10px 14px;
+    color:var(--text);
+    font-family:var(--font);
+    font-size:13px; font-weight:600;
+    outline:none; cursor:pointer;
+  }
+
+  .table-wrap {
+    background:var(--bg2);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    overflow:auto;
+    max-height:70vh;
+  }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+  thead { position:sticky; top:0; z-index:10; }
+
+  th {
+    background:var(--bg3);
+    padding:11px 14px;
+    text-align:left;
+    color:var(--text3);
+    font-weight:800;
+    font-size:10px;
+    letter-spacing:1.5px;
+    text-transform:uppercase;
+    border-bottom:1px solid var(--border);
+    cursor:pointer;
+    white-space:nowrap;
+    user-select:none;
+    transition:color 0.2s;
+  }
+
+  th:hover { color:var(--text); }
+  th .sort-arrow { margin-left:4px; opacity:0.4; }
+  th.sorted { color:var(--cyan); }
+  th.sorted .sort-arrow { opacity:1; }
+
+  td {
+    padding:11px 14px;
+    border-bottom:1px solid rgba(255,255,255,0.035);
+    vertical-align:middle;
+    white-space:nowrap;
+    transition:background 0.15s;
+  }
+
+  tr:last-child td { border-bottom:none; }
+  tr:hover td { background:rgba(255,255,255,0.02); }
+
+  td[contenteditable="true"] { cursor:text; outline:none; border-radius:4px; }
+  td[contenteditable="true"]:focus {
+    background:rgba(0,212,255,0.08);
+    box-shadow:0 0 0 2px rgba(0,212,255,0.25);
+  }
+
+  /* Badges */
+  .badge {
+    display:inline-flex; align-items:center; gap:3px;
+    padding:2px 7px; border-radius:3px;
+    font-size:9px; font-weight:700; font-family:var(--font-mono); white-space:nowrap; letter-spacing:1px;
+  }
+
+  .badge-high { background:rgba(57,255,110,0.08); color:var(--green); }
+  .badge-mid  { background:rgba(255,214,10,0.08); color:var(--yellow); }
+  .badge-low  { background:rgba(255,159,10,0.08); color:var(--orange); }
+  .badge-neg  { background:rgba(255,69,58,0.1); color:var(--red); animation:pulse-red 2s infinite; }
+
+  @keyframes pulse-red {
+    0%,100%{ box-shadow:0 0 0 0 rgba(255,71,87,0.4); }
+    50%    { box-shadow:0 0 0 5px rgba(255,71,87,0); }
+  }
+
+  td.cell-high { background:rgba(5,214,158,0.03); }
+  td.cell-mid  { background:rgba(255,208,75,0.03); }
+  td.cell-low  { background:rgba(255,140,66,0.03); }
+
+  .product-name { font-weight:700; color:var(--text); max-width:260px; overflow:hidden; text-overflow:ellipsis; display:block; }
+
+  .sku-tag {
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:4px; padding:2px 7px;
+    font-size:10px; color:var(--text3);
+    font-family:monospace; letter-spacing:1px;
+  }
+
+  /* ========== CALCULATOR ========== */
+  .calc-layout { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+
+  .calc-card {
+    background:var(--bg2); border:1px solid var(--border);
+    border-radius:var(--radius); padding:22px;
+  }
+
+  .calc-card h3 {
+    font-family:var(--font); font-size:9px; font-weight:700;
+    letter-spacing:2.5px; text-transform:uppercase;
+    margin-bottom:18px; color:var(--text3);
+    padding-bottom:12px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:8px;
+  }
+
+  .form-group { margin-bottom:13px; }
+
+  .form-group label {
+    display:block; font-size:9px; font-weight:700;
+    color:var(--text3); letter-spacing:1.5px; text-transform:uppercase; margin-bottom:6px;
+  }
+
+  .form-group input[type="number"],
+  .form-group input[type="text"] {
+    width:100%; background:var(--bg3); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:9px 12px;
+    color:var(--text); font-family:var(--font-mono); font-size:14px; font-weight:700;
+    outline:none; transition:border-color 0.15s, box-shadow 0.15s;
+  }
+  .form-group input[type="number"]::placeholder,
+  .form-group input[type="text"]::placeholder { color:var(--text3); font-family:var(--font); font-weight:400; font-size:12px; }
+  .form-group input[type="number"]:focus,
+  .form-group input[type="text"]:focus { border-color:var(--cyan); box-shadow:0 0 0 2px rgba(0,245,255,0.06); }
+
+  .form-group input[type="range"] { width:100%; accent-color:var(--cyan); height:3px; margin-top:7px; }
+
+  .range-labels { display:flex; justify-content:space-between; color:var(--text3); font-size:9px; margin-top:4px; }
+
+  .divider { border:none; border-top:1px solid var(--border); margin:14px 0; }
+
+  /* Result blocks */
+  .result-block {
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:14px 16px; margin-bottom:8px; transition:all 0.2s;
+  }
+
+  .result-block.highlight { background:rgba(0,245,255,0.03); border:1px solid rgba(0,245,255,0.12); }
+
+  .result-label {
+    font-size:8px; font-weight:700; color:var(--text3);
+    letter-spacing:2px; text-transform:uppercase; margin-bottom:5px;
+  }
+
+  .result-value {
+    font-family:var(--font-mono); font-size:22px; font-weight:700;
+    letter-spacing:-0.5px; color:var(--text); transition:color 0.2s;
+    white-space:nowrap;
+  }
+
+  .result-value.positive { color:var(--green); }
+  .result-value.negative { color:var(--red); }
+  .result-value.neutral  { color:var(--cyan); }
+
+  .result-sub { color:var(--text3); font-size:10px; margin-top:3px; font-weight:500; }
+  .result-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+
+  /* Meter */
+  .margin-meter {
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:12px 15px; margin-bottom:8px;
+  }
+  .meter-header { display:flex; justify-content:space-between; margin-bottom:8px; font-size:9px; font-weight:700; color:var(--text3); letter-spacing:1.5px; text-transform:uppercase; }
+  .meter-bar { height:3px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; }
+  .meter-fill { height:100%; border-radius:3px; width:0%; transition:width 0.5s cubic-bezier(0.34,1.56,0.64,1), background 0.2s; }
+  .meter-zones { display:flex; gap:12px; margin-top:7px; font-size:9px; color:var(--text3); font-weight:700; letter-spacing:1px; }
+  .zone { display:flex; align-items:center; gap:4px; }
+  .zone-dot { width:4px; height:4px; border-radius:50%; }
+
+  /* ========== DASHBOARD ANIMATIONS ========== */
+  @keyframes dashIn {
+    from { opacity:0; transform:translateY(14px); }
+    to   { opacity:1; transform:none; }
+  }
+  @keyframes countUp {
+    from { opacity:0; transform:scale(0.8); }
+    to   { opacity:1; transform:scale(1); }
+  }
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+  }
+  .dash-skeleton {
+    background: linear-gradient(90deg, var(--bg3) 25%, var(--bg4) 50%, var(--bg3) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.2s ease infinite;
+    border-radius: 8px;
+  }
+  .dash-animate { animation: dashIn 0.4s ease both; }
+  .dash-animate-1 { animation: dashIn 0.35s 0.05s ease both; }
+  .dash-animate-2 { animation: dashIn 0.35s 0.12s ease both; }
+  .dash-animate-3 { animation: dashIn 0.35s 0.19s ease both; }
+  .dash-animate-4 { animation: dashIn 0.35s 0.26s ease both; }
+  .dash-animate-5 { animation: dashIn 0.35s 0.33s ease both; }
+  .dash-animate-6 { animation: dashIn 0.4s  0.42s ease both; }
+  .dash-animate-7 { animation: dashIn 0.4s  0.52s ease both; }
+  .dash-val { animation: countUp 0.5s cubic-bezier(0.34,1.56,0.64,1) both; }
+  ::-webkit-scrollbar { width:3px; height:3px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--bg4); border-radius:3px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--text3); }
+
+  /* ========== RESPONSIVE ========== */
+  @media (max-width:1200px) {
+    .kpi-grid { grid-template-columns:repeat(2,1fr); }
+    .charts-grid { grid-template-columns:1fr; }
+    .risk-grid { grid-template-columns:1fr; }
+  }
+
+  @media (max-width:800px) {
+    :root { --sidebar-w:0px; }
+    .sidebar { transform:translateX(-220px); }
+    .topbar { left:0; }
+    .main { margin-left:0; }
+    .calc-layout { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-inner">
+      <div class="logo-icon" style="background:var(--cyan);width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#000;flex-shrink:0">◈</div>
+      <div class="logo-text">
+        <h1 style="font-size:13px;font-weight:700;letter-spacing:-0.3px;color:var(--text);line-height:1.2">Assessoria em<br><span style="color:var(--cyan)">Marketplace</span></h1>
+      </div>
+    </div>
+  </div>
+  <nav class="nav-section">
+    <div class="nav-label">Menu</div>
+    <div class="nav-item active" onclick="navigate('dashboard', this)">
+      <div class="nav-icon-wrap">▦</div> Dashboard
+    </div>
+    <div class="nav-item" onclick="navigate('calculadora', this)">
+      <div class="nav-icon-wrap">%</div> Calculadora
+    </div>
+    <div class="nav-item" onclick="navigate('produtos', this)">
+      <div class="nav-icon-wrap">≡</div> Produtos
+    </div>
+    <div class="nav-item" onclick="navigate('configuracoes', this)">
+      <div class="nav-icon-wrap">◎</div> Configurações
+    </div>
+  </nav>
+
+  <!-- User profile footer -->
+  <div style="padding:14px 16px;border-top:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:10px">
+      <!-- Avatar -->
+      <div id="user-avatar" onclick="document.getElementById('user-photo-input').click()"
+        style="width:34px;height:34px;border-radius:50%;background:var(--bg4);border:1.5px solid var(--border2);
+        display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;
+        overflow:hidden;transition:border-color 0.2s;font-size:14px;color:var(--text3)"
+        onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border2)'">
+        <span id="user-avatar-icon">👤</span>
+      </div>
+      <input type="file" id="user-photo-input" accept="image/*" style="display:none" onchange="setUserPhoto(this)">
+      <!-- Name input -->
+      <div style="flex:1;min-width:0">
+        <input type="text" id="user-name-input" placeholder="Seu nome..."
+          maxlength="28"
+          style="width:100%;background:transparent;border:none;outline:none;color:var(--text);
+          font-family:var(--font);font-size:12px;font-weight:600;padding:0;cursor:text"
+          onfocus="this.style.color='var(--text)'"
+          onblur="this.style.color='var(--text2)'">
+        <div style="font-size:9px;color:var(--text3);margin-top:1px;letter-spacing:0.5px"></div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-title" id="topbar-title"><span>Dashboard</span></div>
+  <div class="topbar-right">
+    <div class="topbar-badge">
+      <span class="dot"></span> Sistema Ativo
+    </div>
+    
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<main class="main">
+
+  <!-- ===== DASHBOARD ===== -->
+  <div class="page active" id="page-dashboard">
+    <div class="page-inner" style="padding:16px 24px;display:grid;grid-template-rows:auto 1fr 1fr 1fr;gap:10px;height:calc(100vh - 54px);box-sizing:border-box;overflow:hidden">
+
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <h2 style="font-size:17px;font-weight:700;letter-spacing:-0.3px">Dashboard</h2>
+        <div id="alert-area"></div>
+      </div>
+
+      <!-- ROW 1: Margem Média card -->
+      <div id="dash-avg-card" style="min-height:0;overflow:hidden"></div>
+
+      <!-- ROW 2: 4 tier cards -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;min-height:0" id="dash-row1"></div>
+
+      <!-- ROW 3: Top 10 -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+        <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text2);margin-bottom:8px;flex-shrink:0">Top 10 — Produtos Mais Lucrativos</div>
+        <div style="flex:1;min-height:0;position:relative;cursor:pointer" onclick="irParaTop10Filter()">
+          <canvas id="barChart" style="position:absolute;inset:0;width:100%!important;height:100%!important"></canvas>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== PRODUTOS ===== -->
+  <div class="page" id="page-produtos">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>Produtos</h2>
+          <p></p>
+        </div>
+        <button onclick="toggleCadastro()"
+          id="btn_novo_produto"
+          style="background:var(--text);border:none;border-radius:var(--radius-sm);color:#000;
+          font-family:var(--font);font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;
+          padding:8px 16px;cursor:pointer;transition:opacity 0.2s;white-space:nowrap"
+          onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+          + Novo Produto
+        </button>
+      </div>
+
+      <!-- CADASTRO DE PRODUTO -->
+      <div id="cadastro_form" style="display:none;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius);padding:22px;margin-bottom:18px">
+        <h3 style="font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:18px">Cadastrar Produto</h3>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;gap:12px;align-items:end">
+          <div>
+            <label style="display:block;font-size:9px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Nome do Produto</label>
+            <input type="text" id="cad_nome" maxlength="100" placeholder="Nome do produto..."
+              style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);
+              padding:9px 12px;color:var(--text);font-family:var(--font);font-size:13px;outline:none"
+              onfocus="this.style.borderColor='var(--cyan)'" onblur="this.style.borderColor='var(--border)'">
+          </div>
+          <div>
+            <label style="display:block;font-size:9px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">SKU</label>
+            <input type="text" id="cad_sku" placeholder="SKU"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);
+              padding:9px 12px;color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none"
+              onfocus="this.style.borderColor='var(--cyan)'" onblur="this.style.borderColor='var(--border)'">
+          </div>
+          <div>
+            <label style="display:block;font-size:9px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Preço de Custo</label>
+            <input type="text" id="cad_custo" inputmode="decimal" placeholder="R$ 0,00"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);
+              padding:9px 12px;color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none"
+              onfocus="this.style.borderColor='var(--cyan)'" onblur="formatCurrencyInput(this);this.style.borderColor='var(--border)'">
+          </div>
+          <div>
+            <label style="display:block;font-size:9px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Embalagem</label>
+            <input type="text" id="cad_embalagem" inputmode="decimal" placeholder="R$ 0,00"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);
+              padding:9px 12px;color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none"
+              onfocus="this.style.borderColor='var(--cyan)'" onblur="formatCurrencyInput(this);this.style.borderColor='var(--border)'">
+          </div>
+          <div>
+            <label style="display:block;font-size:9px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Outros Custos</label>
+            <input type="text" id="cad_outros" inputmode="decimal" placeholder="R$ 0,00"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);
+              padding:9px 12px;color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none"
+              onfocus="this.style.borderColor='var(--cyan)'" onblur="formatCurrencyInput(this);this.style.borderColor='var(--border)'">
+          </div>
+          <div>
+            <label style="display:block;font-size:9px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Preço de Venda</label>
+            <input type="text" id="cad_preco" inputmode="decimal" placeholder="R$ 0,00"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);
+              padding:9px 12px;color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none"
+              onfocus="this.style.borderColor='var(--cyan)'" onblur="formatCurrencyInput(this);this.style.borderColor='var(--border)'">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;align-items:center">
+          <button onclick="cadastrarProduto()"
+            style="background:var(--text);border:none;border-radius:var(--radius-sm);color:#000;
+            font-family:var(--font);font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;
+            padding:9px 20px;cursor:pointer;transition:opacity 0.2s"
+            onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+            Adicionar
+          </button>
+          <button onclick="toggleCadastro()"
+            style="background:none;border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text2);
+            font-family:var(--font);font-size:11px;font-weight:600;padding:9px 16px;cursor:pointer">
+            Cancelar
+          </button>
+          <span id="cad_err" style="font-size:11px;color:var(--red);font-weight:600"></span>
+        </div>
+      </div>
+
+      <div class="table-controls">
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="Buscar produto..." oninput="filterTable()">
+        </div>
+        <select class="filter-select" id="filterMargin" onchange="filterTable()">
+          <option value="">Todas as Margens</option>
+          <option value="alta">Alta (&gt;15%)</option>
+          <option value="media">Média (10–15%)</option>
+          <option value="baixa">Baixa (0–10%)</option>
+          <option value="neg">Negativa (&lt;0%)</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="prodTable">
+          <thead><tr id="tableHead"></tr></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CALCULADORA ===== -->
+  <div class="page" id="page-calculadora">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>Calculadora</h2>
+          <p></p>
+        </div>
+      </div>
+      <div class="calc-layout">
+
+        <!-- INPUTS -->
+        <div class="calc-card">
+
+          <!-- Seletor PF / PJ -->
+          <h3 style="margin-bottom:14px">Tipo de Vendedor</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">
+            <div id="calc_btn_pf" onclick="calcSelecionarTipo('PF')"
+              style="padding:12px;border-radius:10px;border:2px solid var(--text);background:rgba(255,255,255,0.08);cursor:pointer;text-align:center;transition:all 0.2s">
+              
+              <div style="font-weight:800;font-size:12px;color:var(--text)">Pessoa Física</div>
+            </div>
+            <div id="calc_btn_pj" onclick="calcSelecionarTipo('PJ')"
+              style="padding:12px;border-radius:10px;border:2px solid var(--border);background:var(--bg3);cursor:pointer;text-align:center;transition:all 0.2s">
+              
+              <div style="font-weight:800;font-size:12px;color:var(--text2)">Pessoa Jurídica</div>
+            </div>
+          </div>
+
+
+
+          <hr class="divider">
+
+          <h3 style="margin-bottom:14px">Estrutura de Custos</h3>
+
+          <div class="form-group">
+            <label>Custo do Produto (R$)</label>
+            <input type="text" id="c_produto" value="" inputmode="decimal" autocomplete="off"
+              placeholder="R$ 0,00"
+              oninput="calcPreco()" onblur="formatCurrencyInput(this)" onkeydown="handleEnterInput(event,this)"
+             >
+          </div>
+
+          <div class="form-group">
+            <label>Embalagem (R$)</label>
+            <input type="text" id="c_producao" value="" inputmode="decimal" autocomplete="off"
+              placeholder="R$ 0,00"
+              oninput="calcPreco()" onblur="formatCurrencyInput(this)" onkeydown="handleEnterInput(event,this)"
+             >
+          </div>
+
+          <div class="form-group">
+            <label>Outros Custos (R$)</label>
+            <input type="text" id="c_outros" value="" inputmode="decimal" autocomplete="off"
+              placeholder="R$ 0,00"
+              oninput="calcPreco()" onblur="formatCurrencyInput(this)" onkeydown="handleEnterInput(event,this)"
+             >
+          </div>
+
+          <hr class="divider">
+
+          <div class="form-group">
+            <label style="display:flex;align-items:center;justify-content:space-between;text-transform:none;letter-spacing:0">
+              <span style="text-transform:uppercase;letter-spacing:1px;font-size:11px;font-weight:800;color:var(--text3)">Preço de Venda (R$)</span>
+              <button onclick="resetPrecoSugerido()" style="background:none;border:1px solid var(--border2);border-radius:6px;color:var(--text2);font-size:11px;font-weight:700;padding:3px 10px;cursor:pointer;transition:all 0.2s;font-family:inherit" onmouseover="this.style.borderColor='var(--cyan)';this.style.color='var(--cyan)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text2)'">↺ Limpar</button>
+            </label>
+            <input type="text" id="c_preco_venda" value="" inputmode="decimal" autocomplete="off"
+              placeholder="Digite o preço que deseja cobrar…"
+              oninput="calcPreco()" onblur="formatCurrencyInput(this)" onkeydown="handleEnterInput(event,this)"
+              style="border-color:rgba(0,245,255,0.3);box-shadow:0 0 0 1px rgba(0,245,255,0.08);font-family:var(--font-mono)">
+          </div>
+        </div>
+
+        <!-- RESULTADO -->
+        <div class="calc-card">
+          <h3>Resultado</h3>
+
+          <div class="result-grid" style="margin-bottom:12px">
+            <div class="result-block highlight" style="display:flex;flex-direction:column;justify-content:flex-end">
+              <div class="result-label">Preço de Venda</div>
+              <div class="result-value" id="r_preco_manual" style="color:var(--cyan)">—</div>
+              <div class="result-sub" id="r_preco_manual_sub" style="min-height:16px"></div>
+            </div>
+            <div class="result-block" style="border:1px solid rgba(255,255,255,0.06);display:flex;flex-direction:column;justify-content:flex-end">
+              <div class="result-label">Preço Sugerido</div>
+              <div class="result-value" id="r_preco_sugerido">—</div>
+              <div class="result-sub" id="r_preco_sug_sub" style="min-height:16px">Para atingir a margem alvo</div>
+            </div>
+          </div>
+
+          <div class="result-grid" style="margin-bottom:12px">
+            <div class="result-block">
+              <div class="result-label">Lucro</div>
+              <div class="result-value" id="r_lucro">R$ 0,00</div>
+            </div>
+            <div class="result-block">
+              <div class="result-label">Margem</div>
+              <div class="result-value" id="r_margem_real">0,0%</div>
+            </div>
+          </div>
+
+          <div class="margin-meter">
+            <div class="meter-header">
+              <span>Indicador de Margem</span>
+              <span id="meter-pct">0%</span>
+            </div>
+            <div class="meter-bar"><div class="meter-fill" id="meter-fill"></div></div>
+            <div class="meter-zones">
+              <div class="zone"><div class="zone-dot" style="background:var(--red)"></div>Negativa &lt;0%</div>
+              <div class="zone"><div class="zone-dot" style="background:var(--orange)"></div>Baixa 0–10%</div>
+              <div class="zone"><div class="zone-dot" style="background:var(--yellow)"></div>Média 10–15%</div>
+              <div class="zone"><div class="zone-dot" style="background:var(--green)"></div>Alta &gt;15%</div>
+            </div>
+          </div>
+
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
+            <div class="result-label" style="margin-bottom:12px">Composição de Custos</div>
+            <div style="display:flex;flex-direction:column;gap:8px" id="r_detalhamento"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CONFIGURAÇÕES ===== -->
+  <div class="page" id="page-configuracoes">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>Configurações</h2>
+          <p>Defina seu perfil e taxas. Aplicados automaticamente em todos os cálculos.</p>
+        </div>
+      </div>
+      <div class="calc-layout">
+
+        <!-- COLUNA 1 -->
+        <div class="calc-card">
+
+          <!-- 1. TIPO DE PESSOA -->
+          <h3 style="margin-bottom:14px">Tipo de Vendedor</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">
+            <div id="btn_pf" onclick="selecionarTipo('PF')"
+              style="padding:16px 12px;border-radius:10px;border:2px solid var(--text);background:rgba(255,255,255,0.08);cursor:pointer;text-align:center;transition:all 0.2s">
+              
+              <div style="font-weight:800;font-size:13px;color:var(--text)">Pessoa Física</div>
+            </div>
+            <div id="btn_pj" onclick="selecionarTipo('PJ')"
+              style="padding:16px 12px;border-radius:10px;border:2px solid var(--border);background:var(--bg3);cursor:pointer;text-align:center;transition:all 0.2s">
+              
+              <div style="font-weight:800;font-size:13px;color:var(--text2)">Pessoa Jurídica</div>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- 2. ASSESSORIA -->
+          <h3 style="margin-bottom:14px">Assessoria em Marketplace</h3>
+          <div class="form-group">
+            <label>Taxa de Assessoria (%)</label>
+            <input type="number" id="cfg_assessoria_pct" value="2.5" step="0.1" min="0" max="100" disabled
+              style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text3);font-family:inherit;font-size:15px;font-weight:700;outline:none;cursor:not-allowed;opacity:0.6">
+          </div>
+
+          <hr class="divider">
+
+          <!-- 3. CUSTO FIXO -->
+          <h3 style="margin-bottom:14px">️ Custo Fixo Mensal</h3>
+          <div class="form-group">
+            <label>Custo Fixo Mensal (R$)</label>
+            <input type="number" id="cfg_custo_fixo" value="0" step="0.01" min="0" oninput="salvarConfig()" placeholder="Ex: 500,00">
+            <div style="color:var(--text3);font-size:11px;font-weight:600;margin-top:5px">Aluguel, energia, internet, salários, etc.</div>
+          </div>
+          <div class="form-group">
+            <label>Quantidade de Produtos Vendidos por Mês</label>
+            <input type="number" id="cfg_qtd_vendidos" value="50" step="1" min="1" oninput="salvarConfig()" placeholder="Ex: 50">
+          </div>
+
+          <!-- Toggle: Incluir Custo Fixo nos cálculos -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);margin-top:4px">
+            <div>
+              <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text2)">Incluir Custo Fixo nos cálculos</div>
+              <div style="font-size:10px;font-weight:500;color:var(--text3);margin-top:2px" id="calc_cf_sub">Desativado</div>
+            </div>
+            <div onclick="toggleCustoFixo()" id="toggle_cf"
+              style="width:44px;height:24px;border-radius:12px;background:var(--bg4);border:2px solid var(--border2);cursor:pointer;position:relative;transition:all 0.25s;flex-shrink:0">
+              <div id="toggle_cf_knob"
+                style="width:16px;height:16px;border-radius:50%;background:var(--text3);position:absolute;top:2px;left:2px;transition:all 0.25s"></div>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- 4. IMPOSTO — só aparece para PJ -->
+          <div id="cfg_imposto_section" style="display:none">
+            <h3 style="margin-bottom:14px">Imposto</h3>
+            <div class="form-group">
+              <label>Alíquota de Imposto (%)</label>
+              <input type="number" id="cfg_impostos_pct" value="0" step="0.1" min="0" max="100" oninput="salvarConfig()" placeholder="Ex: 6">
+              <div style="color:var(--text3);font-size:11px;font-weight:600;margin-top:5px">Simples Nacional, Lucro Presumido, etc. Aplicado sobre o preço de venda.</div>
+            </div>
+            <hr class="divider">
+          </div>
+
+          <!-- 5. PUBLICIDADE -->
+          <h3 style="margin-bottom:14px">Publicidade</h3>
+          <div class="form-group">
+            <label>Taxa de Publicidade (%)</label>
+            <input type="number" id="cfg_publicidade" value="5" step="0.1" min="0" max="100" oninput="salvarConfig()" placeholder="Ex: 5">
+          </div>
+
+          <hr class="divider">
+
+          <!-- 6. MARGEM DE LUCRO — só input numérico -->
+          <h3 style="margin-bottom:14px">Margem de Lucro</h3>
+          <div class="form-group">
+            <label>Margem alvo (%)</label>
+            <input type="number" id="cfg_margem_input" value="15" min="1" max="80" step="0.5"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:11px 14px;color:var(--text);font-family:inherit;font-size:15px;font-weight:800;outline:none;transition:border-color 0.2s,box-shadow 0.2s"
+              oninput="syncMargem('input')">
+            <input type="hidden" id="cfg_margem" value="15">
+          </div>
+
+          <!-- Impostos hidden para retrocompatibilidade -->
+          <input type="hidden" id="cfg_impostos" value="0">
+        </div>
+
+        <!-- COLUNA 2 -->
+        <div style="display:flex;flex-direction:column;gap:18px">
+
+          <!-- Resumo ativo -->
+          <div class="calc-card">
+            <h3 style="margin-bottom:14px">Resumo das Configurações Ativas</h3>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <!-- Tipo de Vendedor -->
+              <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px">
+                <div style="font-size:28px" id="cfg_r_tipo_icon"></div>
+                <div>
+                  <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);margin-bottom:4px">Tipo de Vendedor</div>
+                  <div style="font-size:17px;font-weight:800;color:var(--text)" id="cfg_r_tipo">Pessoa Física</div>
+                </div>
+              </div>
+              <!-- Assessoria em Marketplace -->
+              <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between">
+                <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">Assessoria em Marketplace</div>
+                <div style="font-size:17px;font-weight:800;color:var(--text)" id="cfg_r_assessoria">2,5%</div>
+              </div>
+              <!-- Custo Fixo por Produto -->
+              <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between">
+                <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">Custo Fixo por Produto</div>
+                <div style="font-size:17px;font-weight:800;color:var(--text)" id="cfg_r_custo_fixo_unit">R$ 0,00</div>
+              </div>
+              <!-- Imposto — só PJ -->
+              <div id="cfg_r_imposto_card" style="display:none;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;align-items:center;justify-content:space-between">
+                <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">Imposto</div>
+                <div style="font-size:17px;font-weight:800;color:var(--text)" id="cfg_r_imposto">0%</div>
+              </div>
+              <!-- Margem -->
+              <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between">
+                <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">Margem</div>
+                <div style="font-size:17px;font-weight:800;color:var(--text)" id="cfg_r_margem">15%</div>
+              </div>
+              <!-- Publicidade -->
+              <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between">
+                <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">Publicidade</div>
+                <div style="font-size:17px;font-weight:800;color:var(--text)" id="cfg_r_publicidade">5,0%</div>
+              </div>
+            </div>
+
+            <!-- Botão Salvar -->
+            <button onclick="aplicarConfiguracoes()"
+              style="width:100%;margin-top:16px;padding:13px;background:var(--text);border:none;border-radius:var(--radius-sm);
+              color:#000;font-family:var(--font);font-size:13px;font-weight:800;letter-spacing:1px;text-transform:uppercase;
+              cursor:pointer;transition:all 0.2s"
+              onmouseover="this.style.opacity='0.85'"
+              onmouseout="this.style.opacity='1'">
+              Salvar
+            </button>
+            <div id="cfg_save_msg" style="text-align:center;font-size:11px;font-weight:600;color:var(--green);margin-top:8px;opacity:0;transition:opacity 0.3s"></div>
+            <div style="text-align:center;font-size:9px;font-weight:500;color:var(--text3);margin-top:6px;letter-spacing:0.5px;line-height:1.5">
+              As configurações salvas serão aplicadas automaticamente na calculadora de precificação e na precificação dos produtos, garantindo que todos os cálculos utilizem os mesmos parâmetros definidos nas configurações.
+            </div>
+          </div>
+
+          <!-- Tabela de comissões -->
+          <div class="calc-card">
+            <h3 style="margin-bottom:4px">Tabela de Comissões Shopee</h3>
+            <table style="width:100%;font-size:13px;min-width:unset" id="cfg_tabela_comissao">
+              <thead>
+                <tr>
+                  <th style="cursor:default">Faixa de Valor</th>
+                  <th style="cursor:default" id="cfg_tabela_header_col">Comissão (PF)</th>
+                </tr>
+              </thead>
+              <tbody id="cfg_tabela_body"></tbody>
+            </table>
+            <div style="margin-top:14px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.12);border-radius:8px;padding:11px 14px;font-size:11px;font-weight:600;color:var(--text3);line-height:1.6">
+              <span style="color:var(--cyan);font-size:13px">ℹ</span>
+              A comissão paga à Shopee é calculada automaticamente de acordo com a faixa de preço final do produto.
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+/* ===== DATA ===== */
+const rawData = [
+  { nome: "Exemplo de Produto", sku: "EX-001", custo: 10.00, embalagem: 2.00, outros: 0, icms: 0, ipi: 0, qtd: 1, preco: 29.90, sugerido: 0, lucroBruto: 0, margemBruta: 0, taxaAnuncio: 0.2, comissao: 0, pub: 0, assessoria: 0, imposto: 0, lucro: 0, margemLucro: 0, precoBaixo: null, precoMedio: null },
+];
+
+/* ===== TABELA DE COMISSÕES SHOPEE (com taxa vendedor CPF R$3 inclusa) =====
+   Até R$79,99      → 20% + R$4 + R$3 CPF = 20% + R$7
+   R$80 – R$99,99   → 14% + R$16 + R$3 CPF = 14% + R$19
+   R$100 – R$199,99 → 14% + R$20 + R$3 CPF = 14% + R$23
+   R$200 – R$499,99 → 14% + R$26 + R$3 CPF = 14% + R$29
+   Acima de R$500   → 14% + R$26 + R$3 CPF = 14% + R$29
+   Publicidade      = Preço × 5%
+   Lucro = Preço − Custo − Comissão − Publicidade − Assessoria − Imposto
+================================================================== */
+
+function shopeeComissao(preco) {
+  const cpf = (config && config.tipoPessoa === 'PF') ? 3 : 0; // R$3 só para PF
+  if (preco <= 79.99)  return { pct: 0.20, fixo:  4 + cpf };
+  if (preco <= 99.99)  return { pct: 0.14, fixo: 16 + cpf };
+  if (preco <= 199.99) return { pct: 0.14, fixo: 20 + cpf };
+  if (preco <= 499.99) return { pct: 0.14, fixo: 26 + cpf };
+  return                      { pct: 0.14, fixo: 26 + cpf };
+}
+
+function calcComissaoShopee(preco) {
+  const { pct, fixo } = shopeeComissao(preco);
+  return preco * pct + fixo;
+}
+
+// Resolve preço ideal iterativamente (fixo varia por faixa)
+function resolverPrecoIdeal(custoBase, outrosPct, margemDesejadaPct, assessoria) {
+  const PCT_PUB = 0.05;
+  const outros  = (outrosPct || 0) / 100;
+  const margem  = margemDesejadaPct / 100;
+  const ass     = assessoria || 0;
+  // Estimativa inicial com faixa mais baixa
+  let P = (custoBase + 7 + ass) / (1 - 0.20 - PCT_PUB - outros - margem);
+  for (let i = 0; i < 30; i++) {
+    const { pct: cp, fixo: cf } = shopeeComissao(P);
+    const divisor = 1 - cp - PCT_PUB - outros - margem;
+    if (divisor <= 0) return Infinity;
+    const Pnovo = (custoBase + cf + ass) / divisor;
+    if (Math.abs(Pnovo - P) < 0.001) { P = Pnovo; break; }
+    P = Pnovo;
+  }
+  return P;
+}
+
+/* ===== HELPERS ===== */
+const R$ = v => `R$ ${v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
+const pct = v => `${(v * 100).toFixed(1)}%`;
+
+function marginClass(m) {
+  if (m < 0) return 'neg';
+  if (m < 0.05) return 'low';
+  if (m < 0.15) return 'mid';
+  return 'high';
+}
+
+function marginBadge(m) {
+  const cls = marginClass(m);
+  const map = { high: ['badge-high', '▲'], mid: ['badge-mid', '◆'], low: ['badge-low', '▼'], neg: ['badge-neg', '✕'] };
+  const [bcls, icon] = map[cls];
+  return `<span class="badge ${bcls}">${icon} ${pct(m)}</span>`;
+}
+
+/* ===== NAVIGATION ===== */
+const pageNames = { dashboard:'Dashboard', calculadora:'Calculadora', produtos:'Produtos', configuracoes:'Configurações' };
+let calcFirstVisit = true;
+
+function irParaTop10Filter() {
+  const prodNav = document.querySelector('.nav-item[onclick*="produtos"]');
+  navigate('produtos', prodNav);
+  window._top10Filter = [...rawData].sort((a,b) => b.lucro - a.lucro).slice(0,10).map(d => d.nome);
+  const sel = document.getElementById('filterMargin');
+  const search = document.getElementById('searchInput');
+  if (sel) sel.value = '';
+  if (search) search.value = '';
+  renderRows();
+}
+
+function irParaProdutos(filtro) {
+  const prodNav = document.querySelector('.nav-item[onclick*="produtos"]');
+  navigate('produtos', prodNav);
+  const sel = document.getElementById('filterMargin');
+  if (sel) { sel.value = filtro; filterTable(); }
+}
+
+// Navigate to produtos and highlight only the top 10 most profitable
+function irParaTop10(nomeClicado) {
+  const prodNav = document.querySelector('.nav-item[onclick*="produtos"]');
+  navigate('produtos', prodNav);
+  // Clear margin filter and apply name search for the clicked product
+  const sel = document.getElementById('filterMargin');
+  const search = document.getElementById('searchInput');
+  if (sel) sel.value = '';
+  if (search) { search.value = nomeClicado; filterTable(); }
+}
+
+function setUserPhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const avatar = document.getElementById('user-avatar');
+    const icon   = document.getElementById('user-avatar-icon');
+    if (icon) icon.style.display = 'none';
+    avatar.style.backgroundImage = `url(${e.target.result})`;
+    avatar.style.backgroundSize  = 'cover';
+    avatar.style.backgroundPosition = 'center';
+  };
+  reader.readAsDataURL(file);
+}
+
+function navigate(page, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`page-${page}`).classList.add('active');
+  if (el) el.classList.add('active');
+  document.getElementById('topbar-title').innerHTML = `<span>${pageNames[page]}</span>`;
+
+  // Rebuild + animate dashboard every time it's opened
+  if (page === 'dashboard') {
+    setTimeout(() => buildDashboard(), 10);
+  }
+
+  // Zero inputs only on the very first visit
+  if (page === 'calculadora' && calcFirstVisit) {
+    calcFirstVisit = false;
+    document.getElementById('c_produto').value  = '';
+    document.getElementById('c_producao').value = '';
+    document.getElementById('c_outros').value   = '';
+    document.getElementById('c_preco_venda').value = '';
+    calcPreco();
+  }
+}
+
+/* ===== DASHBOARD ===== */
+function buildDashboard() {
+  // Destroy any existing Chart.js instances on these canvases
+  ['barChart','pieChart'].forEach(id => {
+    const c = document.getElementById(id);
+    if (c) { const ch = Chart.getChart(c); if (ch) ch.destroy(); }
+  });
+
+  const total     = rawData.length;
+  const avgMargin = total ? rawData.reduce((a, b) => a + b.margemLucro, 0) / total : 0;
+  const negCount  = rawData.filter(d => d.margemLucro < 0).length;
+  const lowCount  = rawData.filter(d => d.margemLucro >= 0    && d.margemLucro < 0.10).length;
+  const midCount  = rawData.filter(d => d.margemLucro >= 0.10 && d.margemLucro < 0.15).length;
+  const highCount = rawData.filter(d => d.margemLucro >= 0.15).length;
+  const pctOf = n => total > 0 ? Math.round(n / total * 100) : 0;
+
+  // Alert only
+  const alertEl = document.getElementById('alert-area');
+  if (negCount > 0) {
+    const names = rawData.filter(d => d.margemLucro < 0).map(d => d.nome).join(', ');
+    alertEl.innerHTML = `<div class="alert-band" style="margin-bottom:0"><div class="alert-text" style="font-size:10px"><strong>${negCount} produto${negCount!==1?'s':''} com margem negativa:</strong> ${names}</div></div>`;
+  } else { alertEl.innerHTML = ''; }
+
+  // ── ROW 1: 5 KPI cards ───────────────────────────────────────────────────
+  const avgColor = avgMargin < 0 ? 'var(--red)'
+    : avgMargin < 0.10 ? 'var(--orange)'
+    : avgMargin < 0.15 ? 'var(--yellow)'
+    : 'var(--green)';
+  const avgLabel = avgMargin < 0 ? 'Negativa — abaixo de 0%'
+    : avgMargin < 0.10 ? 'Baixa — entre 0% e 10%'
+    : avgMargin < 0.15 ? 'Média — entre 10% e 15%'
+    : 'Alta — acima de 15%';
+
+  const tierDefs = [
+    { label: 'Margem Média',    sub: `${total} produto${total!==1?'s':''} cadastrado${total!==1?'s':''}`, value: Math.round(avgMargin*1000)/10, pct: pct(avgMargin), color: avgColor, filter: '', icon: '◈', delayClass: 'dash-animate-1', isFloat: true },
+    { label: 'Margem Negativa', sub: 'Abaixo de 0%',         value: negCount,   pct: pctOf(negCount)+'%',  color: 'var(--red)',    filter: 'neg',   icon: '✕', delayClass: 'dash-animate-2' },
+    { label: 'Margem Baixa',    sub: 'Entre 0% e 10%',       value: lowCount,   pct: pctOf(lowCount)+'%',  color: 'var(--orange)', filter: 'baixa', icon: '▼', delayClass: 'dash-animate-3' },
+    { label: 'Margem Média',    sub: 'Entre 10% e 15%',      value: midCount,   pct: pctOf(midCount)+'%',  color: 'var(--yellow)', filter: 'media', icon: '◆', delayClass: 'dash-animate-4' },
+    { label: 'Margem Alta',     sub: 'Acima de 15%',         value: highCount,  pct: pctOf(highCount)+'%', color: 'var(--green)',  filter: 'alta',  icon: '▲', delayClass: 'dash-animate-5' },
+  ];
+  // ── ROW 1: Margem Média card with pie chart ──────────────────────────────
+  const avgCardEl = document.getElementById('dash-avg-card');
+  if (avgCardEl) {
+    const avgHexColor = avgMargin < 0 ? '#ff453a' : avgMargin < 0.10 ? '#ff6a00' : avgMargin < 0.15 ? '#ffd60a' : '#39ff6e';
+    avgCardEl.innerHTML = `
+    <div class="dash-animate-1" style="background:var(--bg2);border:1px solid var(--border);border-top:2px solid ${avgColor};border-radius:var(--radius);padding:16px 22px;display:flex;align-items:center;gap:28px;height:100%;box-sizing:border-box">
+      <!-- Pie chart with % in center -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0">
+        <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text2)">Margem Média</div>
+        <canvas id="pieChart" width="150" height="150"></canvas>
+      </div>
+      <!-- Info -->
+      <div style="flex:1">
+        <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:${avgColor};margin-bottom:6px">◈ ${avgMargin < 0 ? 'Margem Negativa' : avgMargin < 0.10 ? 'Margem Baixa' : avgMargin < 0.15 ? 'Margem Média' : 'Margem Alta'}</div>
+        <div style="font-size:11px;color:var(--text2);font-weight:500">${avgMargin < 0 ? 'Abaixo de 0%' : avgMargin < 0.10 ? 'Entre 0% e 10%' : avgMargin < 0.15 ? 'Entre 10% e 15%' : 'Acima de 15%'}</div>
+        <div style="margin-top:10px;height:2px;border-radius:2px;background:rgba(255,255,255,0.04);overflow:hidden;max-width:200px">
+          <div id="avg-main-bar" style="height:100%;width:0%;background:${avgColor};border-radius:2px"></div>
+        </div>
+      </div>
+      <!-- Legend -->
+      <div id="pie-legend" style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;min-width:140px"></div>
+    </div>`;
+    const duration = 900, startTime = performance.now() + 80;
+    const clampedAvg = Math.min(Math.abs(avgMargin), 1);
+    function tickAvg(now) {
+      const p = Math.min((Math.max(0, now - startTime)) / duration, 1);
+      const e = 1 - Math.pow(1 - p, 4);
+      const barEl = document.getElementById('avg-main-bar');
+      if (barEl) barEl.style.width = (e * clampedAvg * 100) + '%';
+      if (p < 1) requestAnimationFrame(tickAvg);
+    }
+    requestAnimationFrame(tickAvg);
+  }
+
+  // ── ROW 2: 4 tier cards with mini ring ──────────────────────────────────
+  const row1 = document.getElementById('dash-row1');
+  row1.innerHTML = tierDefs.slice(1).map((t, i) => {
+    const idx = i + 1;
+    const productLabel = t.value === 1 ? '1 produto' : `${t.value} produtos`;
+    return `
+    <div class="${t.delayClass}"
+      onclick="irParaProdutos('${t.filter}')"
+      style="background:var(--bg2);border:1px solid var(--border);border-top:2px solid ${t.color};
+      border-radius:var(--radius);padding:14px 16px;position:relative;overflow:hidden;
+      cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-sizing:border-box;height:100%;
+      display:flex;flex-direction:column;justify-content:space-between"
+      onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,0.4)'"
+      onmouseout="this.style.transform='';this.style.boxShadow=''">
+      <div style="position:absolute;top:-10px;right:-10px;width:50px;height:50px;border-radius:50%;background:${t.color};opacity:0.08;filter:blur(16px);pointer-events:none"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:${t.color};background:${t.color}15;padding:2px 8px;border-radius:4px">${t.icon} ${t.label}</span>
+        <span class="kpi-pct-${idx}" style="font-family:var(--font-mono);font-size:10px;font-weight:700;color:${t.color}">0%</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="position:relative;flex-shrink:0;width:52px;height:52px">
+          <canvas id="mini-pie-${idx}" width="52" height="52"></canvas>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+            <div class="kpi-pct-mini-${idx}" style="font-family:var(--font-mono);font-size:9px;font-weight:700;color:${t.color}">0%</div>
+          </div>
+        </div>
+        <div>
+          <div class="kpi-val-${idx}" style="font-family:var(--font-mono);font-size:24px;font-weight:700;color:${t.color};line-height:1;letter-spacing:-1px">${t.value === 1 ? `1 produto` : `${t.value} produtos`}</div>
+          <div style="font-size:9px;color:var(--text3);margin-top:4px">${t.sub}</div>
+        </div>
+      </div>
+      <div style="font-size:8px;color:${t.color};margin-top:8px;letter-spacing:1.5px;font-weight:700;opacity:0.6;text-transform:uppercase">Ver produtos →</div>
+    </div>`;
+  }).join('');
+
+  requestAnimationFrame(() => {
+    tierDefs.slice(1).forEach((t, i) => {
+      const idx = i + 1;
+      const c = document.getElementById(`mini-pie-${idx}`);
+      if (!c) return;
+      const ctx2 = c.getContext('2d');
+      const cx = 26, cy = 26, r = 20, lw = 5;
+      const targetFrac = total > 0 ? t.value / total : 0;
+      const targetPct  = pctOf(t.value);
+      const duration   = 900, delay = 200 + i * 80;
+      const startTime  = performance.now() + delay;
+      const colorHex   = t.color.includes('red') ? '#ff453a' : t.color.includes('orange') ? '#ff6a00' : t.color.includes('yellow') ? '#ffd60a' : '#39ff6e';
+      function tickMini(now) {
+        const p2 = Math.min(Math.max(0, now - startTime) / duration, 1);
+        const e2 = 1 - Math.pow(1 - p2, 4);
+        ctx2.clearRect(0, 0, 52, 52);
+        ctx2.beginPath(); ctx2.arc(cx, cy, r, 0, Math.PI*2);
+        ctx2.strokeStyle = 'rgba(255,255,255,0.05)'; ctx2.lineWidth = lw; ctx2.stroke();
+        if (e2 * targetFrac > 0) {
+          ctx2.beginPath();
+          ctx2.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + Math.PI*2*(e2*targetFrac));
+          ctx2.strokeStyle = colorHex; ctx2.lineWidth = lw; ctx2.lineCap = 'round'; ctx2.stroke();
+        }
+        const mp = document.querySelector(`.kpi-pct-mini-${idx}`);
+        const pp = document.querySelector(`.kpi-pct-${idx}`);
+        if (mp) mp.textContent = Math.round(e2 * targetPct) + '%';
+        if (pp) pp.textContent = Math.round(e2 * targetPct) + '%';
+        if (p2 < 1) requestAnimationFrame(tickMini);
+      }
+      requestAnimationFrame(tickMini);
+    });
+  });
+
+  // ── Bar chart: Top 10 ─────────────────────────────────────────────────────
+  const top10 = [...rawData].sort((a,b) => b.lucro - a.lucro).slice(0, 10);
+  const barCanvas = document.getElementById('barChart');
+  if (barCanvas) {
+    const barCtx = barCanvas.getContext('2d');
+    const barColors = top10.map(d => d.margemLucro < 0 ? '#ff453a' : d.margemLucro < 0.10 ? '#ff6a00' : d.margemLucro < 0.15 ? '#ffd60a' : '#39ff6e');
+    new Chart(barCtx, {
+      type: 'bar',
+      data: {
+        labels: top10.map(d => d.nome.length > 18 ? d.nome.substring(0,18)+'…' : d.nome),
+        datasets: [{ data: top10.map(d => d.lucro),
+          backgroundColor: barColors.map(c => c + 'aa'),
+          borderColor: barColors, borderWidth: 1,
+          borderRadius: { topLeft: 5, topRight: 5 },
+          borderSkipped: false, barPercentage: 0.55 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 900, easing: 'easeOutQuart' },
+        onClick: () => { irParaTop10Filter(); },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#111', titleColor: '#fff', bodyColor: '#8a8f98',
+            borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1, padding: 10, cornerRadius: 8,
+            callbacks: {
+              label: c => ` Lucro: ${R$(c.raw)}`,
+              afterLabel: c => ` Margem: ${pct(top10[c.dataIndex].margemLucro)}`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#3a3a3c', font: { size: 9, weight:'600', family:'Space Grotesk' } }, grid: { display: false }, border: { display: false } },
+          y: { ticks: { color: '#3a3a3c', font: { size: 9, family:'Space Grotesk' }, callback: v => `R$${v}` }, grid: { color: 'rgba(255,255,255,0.03)' }, border: { display: false } }
+        }
+      }
+    });
+  }
+
+  // ── Pie chart ────────────────────────────────────────────────────────────────
+  const pieCanvas = document.getElementById('pieChart');
+  if (pieCanvas) {
+    const pieCtx = pieCanvas.getContext('2d');
+    new Chart(pieCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Negativa','Baixa','Média','Alta'],
+        datasets: [{ data: [negCount, lowCount, midCount, highCount],
+          backgroundColor: ['#ff453a','#ff6a00','#ffd60a','#39ff6e'],
+          borderColor: '#0a0a0a', borderWidth: 3, hoverOffset: 8 }]
+      },
+      options: {
+        responsive: false,
+        animation: { duration: 900, easing: 'easeOutQuart' },
+        cutout: '65%',
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#111', titleColor: '#fff', bodyColor: '#8a8f98',
+            borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1, padding: 10, cornerRadius: 8,
+            callbacks: { label: c => ` ${c.label}: ${c.raw} produto${c.raw!==1?'s':''} (${pctOf(c.raw)}%)` }
+          }
+        }
+      },
+        plugins: [{
+        id: 'centerLbl',
+        afterDraw(chart) {
+          const { ctx: c2, chartArea: { width, height, left, top } } = chart;
+          c2.save();
+          const cx2 = left+width/2, cy2 = top+height/2;
+          const avgPctStr = (avgMargin * 100).toFixed(1) + '%';
+          const tierLabel = avgMargin < 0 ? 'NEGATIVA' : avgMargin < 0.10 ? 'BAIXA' : avgMargin < 0.15 ? 'MÉDIA' : 'ALTA';
+          const colorHex = avgMargin < 0 ? '#ff453a' : avgMargin < 0.10 ? '#ff6a00' : avgMargin < 0.15 ? '#ffd60a' : '#39ff6e';
+          c2.font = '700 14px Space Mono, monospace';
+          c2.fillStyle = colorHex; c2.textAlign = 'center'; c2.textBaseline = 'middle';
+          c2.fillText(avgPctStr, cx2, cy2 - 8);
+          c2.font = '500 7px Space Grotesk, sans-serif';
+          c2.fillStyle = colorHex; c2.letterSpacing = '2px';
+          c2.fillText(tierLabel, cx2, cy2 + 8);
+          c2.restore();
+        }
+      }]
+    });
+
+    // Pie legend
+    const legendEl = document.getElementById('pie-legend');
+    if (legendEl) {
+      const cols = ['#ff453a','#ff6a00','#ffd60a','#39ff6e'];
+      const lbls = ['Negativa','Baixa','Média','Alta'];
+      const vals = [negCount, lowCount, midCount, highCount];
+      legendEl.innerHTML = lbls.map((l,i) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:7px;height:7px;border-radius:50%;background:${cols[i]};flex-shrink:0"></div>
+            <span style="font-size:10px;color:var(--text2)">${l}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-family:var(--font-mono);font-size:10px;font-weight:700;color:${cols[i]}">${vals[i]} produto${vals[i]!==1?'s':''}</span>
+            <span style="font-size:9px;color:var(--text3)">${pctOf(vals[i])}%</span>
+          </div>
+        </div>`).join('');
+    }
+  }
+
+}
+
+
+/* ===== PRODUCTS TABLE ===== */
+let sortCol = -1, sortDir = 1;
+
+// Helper: tier color based on margem (same as calculator)
+function tierColor(m) {
+  if (m < 0)    return 'var(--red)';
+  if (m < 0.10) return 'var(--orange)';
+  if (m < 0.15) return 'var(--yellow)';
+  return 'var(--green)';
+}
+
+const cols = [
+  // 1. Produto — truncado a 100 chars
+  { key: 'nome',        label: 'Produto',
+    fmt: v => `<span class="product-name" title="${v}">${v.length > 100 ? v.substring(0,100)+'…' : v}</span>`,
+    edit: true, type: 'text' },
+  // 2. SKU
+  { key: 'sku',         label: 'SKU',
+    fmt: v => `<span class="sku-tag">${v}</span>`,
+    edit: true, type: 'text' },
+  // 3. Preço de Custo
+  { key: 'custo',       label: 'Preço de Custo',
+    fmt: v => R$(v),
+    edit: true, type: 'number' },
+  // 4. Embalagem
+  { key: 'embalagem',   label: 'Embalagem',
+    fmt: v => R$(v || 0),
+    edit: true, type: 'number' },
+  // 5. Outros Custos
+  { key: 'outros',      label: 'Outros Custos',
+    fmt: v => R$(v || 0),
+    edit: true, type: 'number' },
+  // 5. Preço de Venda
+  { key: 'preco',       label: 'Preço de Venda',
+    fmt: (v,r) => `<span style="color:${tierColor(r.margemLucro)};font-weight:700;font-family:var(--font-mono)">${R$(v)}</span>`,
+    edit: true, type: 'number' },
+  // 6. Preço Sugerido
+  { key: 'sugerido',    label: 'Preço Sugerido',
+    fmt: v => `<span style="color:${tierColor(config.margem/100)};font-weight:700;font-family:var(--font-mono)">${R$(v)}</span>` },
+  // 7. Assessoria em Marketplace
+  { key: '_assessoria', label: 'Assessoria em Marketplace',
+    fmt: (v,r) => R$(r.preco * config.assessoriaPct / 100) },
+  // 8. Imposto — só para PJ
+  { key: '_imposto',    label: 'Imposto',
+    fmt: (v,r) => R$(r.preco * config.impostos / 100),
+    hide: () => config.tipoPessoa !== 'PJ' },
+  // 9. Publicidade
+  { key: 'pub',         label: 'Publicidade',
+    fmt: v => R$(v) },
+  // 10. Shopee
+  { key: 'comissao',    label: 'Shopee',
+    fmt: v => R$(v) },
+  // 11. Lucro
+  { key: 'lucro',       label: 'Lucro',
+    fmt: (v,r) => `<span style="color:${tierColor(r.margemLucro)};font-weight:700;font-family:var(--font-mono)">${R$(v)}</span>` },
+  // 12. Margem
+  { key: 'margemLucro', label: 'Margem',
+    fmt: v => `<span style="color:${tierColor(v)};font-weight:700;font-family:var(--font-mono)">${pct(v)}</span>` },
+  // 13. Excluir
+  { key: '_del', label: '',
+    fmt: (v, r) => {
+      const idx = rawData.indexOf(r);
+      return `<button onclick="excluirProduto(${idx})" title="Excluir produto"
+        style="background:none;border:1px solid rgba(255,69,58,0.3);border-radius:5px;color:var(--red);
+        font-size:11px;font-weight:700;padding:3px 8px;cursor:pointer;transition:all 0.15s;font-family:var(--font)"
+        onmouseover="this.style.background='rgba(255,69,58,0.12)';this.style.borderColor='var(--red)'"
+        onmouseout="this.style.background='none';this.style.borderColor='rgba(255,69,58,0.3)'">✕</button>`;
+    }
+  },
+];
+
+function buildTable() {
+  const head = document.getElementById('tableHead');
+  head.innerHTML = cols
+    .filter(c => !c.hide || !c.hide())
+    .map((c, i) => {
+      const realIdx = cols.indexOf(c);
+      return `<th onclick="sortTable(${realIdx})" ${sortCol===realIdx ? 'class="sorted"' : ''}>
+        ${c.label} <span class="sort-arrow">${sortCol===realIdx ? (sortDir===1?'↑':'↓') : '⇅'}</span>
+      </th>`;
+    }).join('');
+  renderRows();
+}
+
+function renderRows() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const filter = document.getElementById('filterMargin').value;
+
+  let data = [...rawData];
+  if (sortCol >= 0) {
+    const key = cols[sortCol].key;
+    data.sort((a, b) => {
+      const va = a[key], vb = b[key];
+      return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * sortDir;
+    });
+  }
+
+  data = data.filter(d => {
+    if (window._top10Filter) return window._top10Filter.includes(d.nome);
+    if (search && !d.nome.toLowerCase().includes(search) && !d.sku.toLowerCase().includes(search)) return false;
+    if (filter === 'alta'  && d.margemLucro < 0.15) return false;
+    if (filter === 'media' && (d.margemLucro < 0.10 || d.margemLucro >= 0.15)) return false;
+    if (filter === 'baixa' && (d.margemLucro < 0    || d.margemLucro >= 0.10)) return false;
+    if (filter === 'neg'   && d.margemLucro >= 0) return false;
+    return true;
+  });
+
+  const mc = marginClass;
+  const visibleCols = cols.filter(c => !c.hide || !c.hide());
+  const body = document.getElementById('tableBody');
+  body.innerHTML = data.map((row) => `
+    <tr>
+      ${visibleCols.map((c) => {
+        const v = row[c.key];
+        const cellClass = c.key === 'margemLucro' ? `cell-${mc(row.margemLucro)}` : '';
+        const editAttr = c.edit
+          ? `contenteditable="true" onblur="updateCell(this,${rawData.indexOf(row)},'${c.key}','${c.type||'number'}')" title="Clique para editar"`
+          : '';
+        const editStyle = c.edit
+          ? `style="cursor:text;border-bottom:1px dashed rgba(255,255,255,0.12);"`
+          : '';
+        return `<td class="${cellClass}" ${editAttr} ${editStyle}>${c.fmt(v, row)}</td>`;
+      }).join('')}
+    </tr>
+  `).join('');
+}
+
+function sortTable(i) {
+  if (sortCol === i) sortDir *= -1;
+  else { sortCol = i; sortDir = 1; }
+  buildTable();
+}
+
+function excluirProduto(idx) {
+  if (!confirm(`Excluir "${rawData[idx].nome}"?`)) return;
+  rawData.splice(idx, 1);
+  atualizarContadorProdutos();
+  buildTable();
+
+  // Persiste lista atualizada no Firebase
+  if (window._fb) window._fb.fbSalvarProdutos(rawData.map(produtoParaFb));
+}
+
+function toggleCadastro() {
+  const form = document.getElementById('cadastro_form');
+  const visible = form.style.display !== 'none';
+  form.style.display = visible ? 'none' : 'block';
+  if (!visible) document.getElementById('cad_nome').focus();
+}
+
+function cadastrarProduto() {
+  const nome = document.getElementById('cad_nome').value.trim();
+  const sku  = document.getElementById('cad_sku').value.trim();
+  const custo    = parseCurrency(document.getElementById('cad_custo').value);
+  const embalagem= parseCurrency(document.getElementById('cad_embalagem').value);
+  const outros   = parseCurrency(document.getElementById('cad_outros').value);
+  const preco    = parseCurrency(document.getElementById('cad_preco').value);
+  const err = document.getElementById('cad_err');
+
+  if (!nome) { err.textContent = 'Informe o nome do produto.'; return; }
+  if (preco === 0) { err.textContent = 'Informe o preço de venda.'; return; }
+  err.textContent = '';
+
+  const novo = { nome, sku: sku || '—', custo, embalagem, outros,
+    icms:0, ipi:0, qtd:1, preco, sugerido:0,
+    lucroBruto:0, margemBruta:0, taxaAnuncio:0.2,
+    comissao:0, pub:0, assessoria:0, imposto:0, lucro:0, margemLucro:0,
+    precoBaixo:null, precoMedio:null };
+
+  recalcProduto(novo);
+  rawData.push(novo);
+  atualizarContadorProdutos();
+  buildTable();
+
+  // Persiste produtos no Firebase
+  if (window._fb) window._fb.fbSalvarProdutos(rawData.map(produtoParaFb));
+
+  // Limpar form
+  ['cad_nome','cad_sku','cad_custo','cad_embalagem','cad_outros','cad_preco']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('cadastro_form').style.display = 'none';
+}
+
+function atualizarContadorProdutos() {
+  const tag = document.querySelector('#page-produtos .page-header button#btn_novo_produto');
+  // update counter in table controls area if exists
+  const counter = document.getElementById('prod_counter');
+  if (counter) counter.textContent = rawData.length + ' produto' + (rawData.length !== 1 ? 's' : '');
+}
+
+function filterTable() { window._top10Filter = null; renderRows(); }
+
+function updateCell(cell, rowIdx, key, type) {
+  const raw = cell.innerText.trim();
+  if (!raw) return;
+
+  if (type === 'text') {
+    // Texto: nome ou sku
+    rawData[rowIdx][key] = raw;
+    // Atualiza o span interno sem re-renderizar a linha inteira
+    if (key === 'nome') {
+      const span = cell.querySelector('.product-name');
+      if (span) { span.textContent = raw; span.title = raw; }
+    } else if (key === 'sku') {
+      const span = cell.querySelector('.sku-tag');
+      if (span) span.textContent = raw;
+    }
+  } else {
+    // Número: custo ou preco
+    const num = parseFloat(
+      raw.replace('R$','').replace(/\s/g,'').replace(/\./g,'').replace(',','.')
+    );
+    if (isNaN(num)) return;
+    rawData[rowIdx][key] = num;
+    const r = rawData[rowIdx];
+    if (key === 'custo' || key === 'preco' || key === 'embalagem' || key === 'outros') {
+      recalcProduto(r);
+      renderRows();
+    }
+  }
+
+  // Persiste edição no Firebase
+  if (window._fb) window._fb.fbSalvarProdutos(rawData.map(produtoParaFb));
+}
+
+/* ===== CONFIGURAÇÕES ===== */
+const config = {
+  impostos: 0,
+  margem: 15,
+  tipoPessoa: 'PF',
+  assessoriaPct: 2.5,     // fixo 2,5%
+  publicidadePct: 5,      // editável pelo usuário
+  custoFixoTotal: 0,
+  qtdVendidos: 50,
+  custoFixoUnit: 0
+};
+
+let custoFixoAtivo = false; // toggle na calculadora
+
+// Tabela de comissões por tipo
+const COMISSAO_TABELA = {
+  PF: [
+    { faixa: 'Até R$ 79,99',       pct: 0.20, fixo: 7  },
+    { faixa: 'R$ 80 – R$ 99,99',   pct: 0.14, fixo: 19 },
+    { faixa: 'R$ 100 – R$ 199,99', pct: 0.14, fixo: 23 },
+    { faixa: 'R$ 200 – R$ 499,99', pct: 0.14, fixo: 29 },
+    { faixa: 'Acima de R$ 500',    pct: 0.14, fixo: 29 }
+  ],
+  PJ: [
+    { faixa: 'Até R$ 79,99',       pct: 0.20, fixo: 4  },
+    { faixa: 'R$ 80 – R$ 99,99',   pct: 0.14, fixo: 16 },
+    { faixa: 'R$ 100 – R$ 199,99', pct: 0.14, fixo: 20 },
+    { faixa: 'R$ 200 – R$ 499,99', pct: 0.14, fixo: 26 },
+    { faixa: 'Acima de R$ 500',    pct: 0.14, fixo: 26 }
+  ]
+};
+
+function shopeeComissao(preco) {
+  const tabela = COMISSAO_TABELA[config.tipoPessoa];
+  if (preco <= 79.99)  return tabela[0];
+  if (preco <= 99.99)  return tabela[1];
+  if (preco <= 199.99) return tabela[2];
+  if (preco <= 499.99) return tabela[3];
+  return tabela[4];
+}
+
+function calcComissaoShopee(preco) {
+  const { pct, fixo } = shopeeComissao(preco);
+  return preco * pct + fixo;
+}
+
+function resolverPrecoIdeal(custoBase, outrosPct, margemDesejadaPct, assessoria) {
+  const PCT_PUB        = config.publicidadePct / 100;
+  const PCT_ASSESSORIA = config.assessoriaPct / 100;
+  const outros  = (outrosPct || 0) / 100;
+  const margem  = margemDesejadaPct / 100;
+  const ass     = assessoria || 0;
+  const tabela  = COMISSAO_TABELA[config.tipoPessoa];
+  let P = (custoBase + tabela[0].fixo + ass) / (1 - tabela[0].pct - PCT_PUB - PCT_ASSESSORIA - outros - margem);
+  for (let i = 0; i < 30; i++) {
+    const { pct: cp, fixo: cf } = shopeeComissao(P);
+    const divisor = 1 - cp - PCT_PUB - PCT_ASSESSORIA - outros - margem;
+    if (divisor <= 0) return Infinity;
+    const Pnovo = (custoBase + cf + ass) / divisor;
+    if (Math.abs(Pnovo - P) < 0.001) { P = Pnovo; break; }
+    P = Pnovo;
+  }
+  return P;
+}
+
+function atualizarTabelaComissao() {
+  const tipo    = config.tipoPessoa;
+  const tabela  = COMISSAO_TABELA[tipo];
+  const cor     = tipo === 'PF' ? 'var(--cyan)' : 'var(--green)';
+  const label   = tipo === 'PF' ? 'Pessoa Física' : 'Pessoa Jurídica';
+
+  
+  document.getElementById('cfg_tabela_header_col').textContent   = `Comissão (${tipo})`;
+
+  document.getElementById('cfg_tabela_body').innerHTML = tabela.map(row => `
+    <tr>
+      <td>${row.faixa}</td>
+      <td style="font-weight:800;color:${cor}">${(row.pct*100).toFixed(0)}% + R$${row.fixo}</td>
+    </tr>`).join('');
+}
+
+function selecionarTipo(tipo) {
+  config.tipoPessoa = tipo;
+  const btnPF = document.getElementById('btn_pf');
+  const btnPJ = document.getElementById('btn_pj');
+  const impostoSection = document.getElementById('cfg_imposto_section');
+  const impostoCard    = document.getElementById('cfg_r_imposto_card');
+  const labelPF = btnPF ? btnPF.querySelector('div') : null;
+  const labelPJ = btnPJ ? btnPJ.querySelector('div') : null;
+
+  if (tipo === 'PF') {
+    if (btnPF) { btnPF.style.borderColor = 'var(--text)'; btnPF.style.background = 'rgba(255,255,255,0.08)'; }
+    if (labelPF) labelPF.style.color = 'var(--text)';
+    if (btnPJ) { btnPJ.style.borderColor = 'var(--border)'; btnPJ.style.background = 'var(--bg3)'; }
+    if (labelPJ) labelPJ.style.color = 'var(--text2)';
+    if (impostoSection) impostoSection.style.display = 'none';
+    if (impostoCard)    impostoCard.style.display    = 'none';
+    const icon = document.getElementById('cfg_r_tipo_icon');
+    if (icon) icon.textContent = '';
+  } else {
+    if (btnPJ) { btnPJ.style.borderColor = 'var(--text)'; btnPJ.style.background = 'rgba(255,255,255,0.08)'; }
+    if (labelPJ) labelPJ.style.color = 'var(--text)';
+    if (btnPF) { btnPF.style.borderColor = 'var(--border)'; btnPF.style.background = 'var(--bg3)'; }
+    if (labelPF) labelPF.style.color = 'var(--text2)';
+    if (impostoSection) impostoSection.style.display = 'block';
+    if (impostoCard)    impostoCard.style.display    = 'flex';
+    const icon = document.getElementById('cfg_r_tipo_icon');
+    if (icon) icon.textContent = '';
+  }
+
+  atualizarTabelaComissao();
+  salvarConfig();
+}
+
+function syncMargem(origem) {
+  const input  = document.getElementById('cfg_margem_input');
+  const hidden = document.getElementById('cfg_margem');
+  let v = Math.min(80, Math.max(1, parseFloat(input.value) || 20));
+  input.value  = v;
+  hidden.value = v;
+  salvarConfig();
+}
+
+function aplicarConfiguracoes() {
+  // Lê todos os campos e aplica imediatamente
+  salvarConfig();
+
+  // Feedback visual
+  const msg = document.getElementById('cfg_save_msg');
+  if (msg) {
+    msg.textContent = '✓ Configurações aplicadas';
+    msg.style.opacity = '1';
+    setTimeout(() => { msg.style.opacity = '0'; }, 2500);
+  }
+}
+
+function salvarConfig() {
+  config.margem         = parseFloat(document.getElementById('cfg_margem').value)          || 15;
+  config.publicidadePct = parseFloat(document.getElementById('cfg_publicidade').value)     ?? 5;
+  config.custoFixoTotal = parseFloat(document.getElementById('cfg_custo_fixo').value)      || 0;
+  config.qtdVendidos    = parseFloat(document.getElementById('cfg_qtd_vendidos').value)    || 1;
+  config.custoFixoUnit  = config.custoFixoTotal / config.qtdVendidos;
+  // Imposto só existe para PJ
+  const impostoInput    = document.getElementById('cfg_impostos_pct');
+  config.impostos       = (impostoInput && config.tipoPessoa === 'PJ') ? (parseFloat(impostoInput.value) || 0) : 0;
+
+  // Resumo
+  const rTipo = document.getElementById('cfg_r_tipo');
+  rTipo.textContent = config.tipoPessoa === 'PF' ? 'Pessoa Física' : 'Pessoa Jurídica';
+  rTipo.style.color = 'var(--text)';
+
+  document.getElementById('cfg_r_margem').textContent          = config.margem + '%';
+  document.getElementById('cfg_r_assessoria').textContent      = config.assessoriaPct.toFixed(1) + '%';
+  document.getElementById('cfg_r_publicidade').textContent     = config.publicidadePct.toFixed(1) + '%';
+  document.getElementById('cfg_r_custo_fixo_unit').textContent = R$(config.custoFixoUnit);
+
+  const impostoCard = document.getElementById('cfg_r_imposto');
+  if (impostoCard) impostoCard.textContent = config.impostos.toFixed(1) + '%';
+
+  const tag = document.getElementById('calc_tag_config');
+  if (tag) tag.textContent = `Margem: ${config.margem}% · ${config.tipoPessoa}`;
+
+  const sub = document.getElementById('calc_cf_sub');
+  if (sub) sub.textContent = custoFixoAtivo
+    ? (config.custoFixoUnit > 0 ? `${R$(config.custoFixoUnit)} / produto incluído` : 'Configure o valor em Custo Fixo')
+    : 'Desativado';
+
+  rawData.forEach(r => recalcProduto(r));
+  buildTable(); // rebuild headers in case PF/PJ changed imposto column visibility
+  atualizarCalcPreview();
+  calcPreco();
+
+  // Persiste configurações no Firebase silenciosamente
+  if (window._fb) {
+    window._fb.fbSalvarConfig({
+      tipoPessoa:    config.tipoPessoa,
+      margem:        config.margem,
+      publicidadePct:config.publicidadePct,
+      custoFixoTotal:config.custoFixoTotal,
+      qtdVendidos:   config.qtdVendidos,
+      impostos:      config.impostos
+    });
+  }
+}
+
+function recalcProduto(r) {
+  if (r.embalagem === undefined) r.embalagem = 0;
+  if (r.outros === undefined) r.outros = 0;
+  const custoTotal   = r.custo + r.embalagem + r.outros;
+  const { pct: cp, fixo: cf } = shopeeComissao(r.preco);
+  r.comissao         = r.preco * cp + cf;
+  r.pub              = r.preco * (config.publicidadePct / 100);
+  const assessoria   = r.preco * (config.assessoriaPct / 100);
+  const impostoCusto = r.preco * (config.impostos / 100);
+  r.lucro       = r.preco - custoTotal - r.comissao - r.pub - assessoria - impostoCusto;
+  r.margemLucro = r.lucro / r.preco;
+  r.lucroBruto  = r.preco - custoTotal;
+  r.margemBruta = r.lucroBruto / r.preco;
+  r.sugerido    = resolverPrecoIdeal(custoTotal, config.impostos, config.margem, 0);
+}
+
+/* ===== CURRENCY INPUT HELPERS ===== */
+function parseCurrency(val) {
+  if (!val) return 0;
+  // Remove R$, spaces, dots (thousand sep), replace comma with dot
+  return parseFloat(val.replace(/R\$\s*/g,'').replace(/\./g,'').replace(',','.')) || 0;
+}
+
+function formatCurrencyInput(input) {
+  const num = parseCurrency(input.value);
+  if (num > 0) {
+    input.value = 'R$ ' + num.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  } else {
+    input.value = '';
+  }
+  calcPreco();
+}
+
+function handleEnterInput(e, input) {
+  if (e.key === 'Enter') { input.blur(); }
+}
+function calcSelecionarTipo(tipo) {
+  config.tipoPessoa = tipo;
+  const btnPF = document.getElementById('calc_btn_pf');
+  const btnPJ = document.getElementById('calc_btn_pj');
+  const labelPF = btnPF ? btnPF.querySelector('div') : null;
+  const labelPJ = btnPJ ? btnPJ.querySelector('div') : null;
+
+  if (tipo === 'PF') {
+    if (btnPF) { btnPF.style.borderColor = 'var(--text)'; btnPF.style.background = 'rgba(255,255,255,0.08)'; }
+    if (labelPF) labelPF.style.color = 'var(--text)';
+    if (btnPJ) { btnPJ.style.borderColor = 'var(--border)'; btnPJ.style.background = 'var(--bg3)'; }
+    if (labelPJ) labelPJ.style.color = 'var(--text2)';
+  } else {
+    if (btnPJ) { btnPJ.style.borderColor = 'var(--text)'; btnPJ.style.background = 'rgba(255,255,255,0.08)'; }
+    if (labelPJ) labelPJ.style.color = 'var(--text)';
+    if (btnPF) { btnPF.style.borderColor = 'var(--border)'; btnPF.style.background = 'var(--bg3)'; }
+    if (labelPF) labelPF.style.color = 'var(--text2)';
+  }
+
+  // Espelha nos botões das configurações
+  selecionarTipo(tipo);
+  atualizarCalcPreview();
+}
+
+function atualizarCalcPreview() {
+  const preview = document.getElementById('calc_config_preview');
+  if (!preview) return;
+
+  const itens = [
+    { label: 'Assessoria',    valor: config.assessoriaPct.toFixed(1) + '%',       cor: 'var(--yellow)' },
+    { label: 'Custo Fixo/Prod', valor: R$(config.custoFixoUnit),                  cor: 'var(--text)'   },
+  ];
+
+  if (config.tipoPessoa === 'PJ' && config.impostos > 0) {
+    itens.push({ label: 'Imposto', valor: config.impostos.toFixed(1) + '%', cor: 'var(--red)' });
+  }
+
+  itens.push(
+    { label: 'Margem Alvo',  valor: config.margem + '%',                           cor: 'var(--cyan)'   },
+    { label: 'Publicidade',  valor: config.publicidadePct.toFixed(1) + '%',        cor: 'var(--orange)' }
+  );
+
+  preview.innerHTML = itens.map(i => `
+    <div style="display:flex;align-items:center;gap:5px;white-space:nowrap">
+      <span style="color:var(--text3);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px">${i.label}:</span>
+      <span style="color:${i.cor};font-size:13px;font-weight:800">${i.valor}</span>
+    </div>`).join('');
+
+  // Atualiza também a tag do header
+  const tag = document.getElementById('calc_tag_config');
+  if (tag) tag.textContent = `Margem: ${config.margem}% · ${config.tipoPessoa}`;
+}
+function resetPrecoSugerido() {
+  const el = document.getElementById('c_preco_venda');
+  el.value = '';
+  calcPreco();
+}
+
+function toggleCustoFixo() {
+  custoFixoAtivo = !custoFixoAtivo;
+  const knob   = document.getElementById('toggle_cf_knob');
+  const toggle = document.getElementById('toggle_cf');
+  const sub    = document.getElementById('calc_cf_sub');
+  if (custoFixoAtivo) {
+    toggle.style.background  = 'rgba(0,245,255,0.15)';
+    toggle.style.borderColor = 'var(--cyan)';
+    knob.style.left          = '22px';
+    knob.style.background    = 'var(--cyan)';
+    if (sub) sub.textContent = config.custoFixoUnit > 0 ? `${R$(config.custoFixoUnit)} / produto incluído` : 'Configure o valor em Custo Fixo';
+  } else {
+    toggle.style.background  = 'var(--bg4)';
+    toggle.style.borderColor = 'var(--border2)';
+    knob.style.left          = '2px';
+    knob.style.background    = 'var(--text3)';
+    if (sub) sub.textContent = 'Desativado';
+  }
+  calcPreco();
+}
+
+function detalheCard(label, valor, cor) {
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px">
+      <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${label}</div>
+      <div style="font-size:14px;font-weight:700;font-family:var(--font-mono);color:${cor||'var(--text)'}">${valor}</div>
+    </div>`;
+}
+
+function calcPreco() {
+  const produto     = parseCurrency(document.getElementById('c_produto').value);
+  const embalagem   = parseCurrency(document.getElementById('c_producao').value);
+  const outros      = parseCurrency(document.getElementById('c_outros').value);
+  const precoManual = parseCurrency(document.getElementById('c_preco_venda').value);
+
+  // Só calcula e exibe resultados quando o preço de venda é informado
+  const semPreco = precoManual === 0;
+
+  if (semPreco) {
+    document.getElementById('r_preco_manual').textContent     = '—';
+    document.getElementById('r_preco_manual_sub').textContent = 'Nenhum preço informado';
+    document.getElementById('r_preco_manual').className       = 'result-value';
+    document.getElementById('r_preco_manual').style.color     = '';
+    document.getElementById('r_preco_sugerido').textContent   = '—';
+    document.getElementById('r_preco_sug_sub').textContent    = 'Informe o preço de venda';
+    document.getElementById('r_lucro').textContent            = '—';
+    document.getElementById('r_lucro').style.color            = '';
+    document.getElementById('r_margem_real').textContent      = '—';
+    document.getElementById('r_margem_real').style.color      = '';
+    document.getElementById('meter-fill').style.width         = '0%';
+    document.getElementById('meter-pct').textContent          = '—';
+    document.getElementById('r_detalhamento').innerHTML       = '';
+    return;
+  }
+
+  const cfUnit      = custoFixoAtivo ? config.custoFixoUnit : 0;
+  const custoBase   = produto + embalagem + outros + cfUnit;
+  const impostosPct = config.impostos;
+  const PCT_ASSESSO = config.assessoriaPct / 100;
+  const PCT_PUB     = config.publicidadePct / 100;
+
+  // Preço sugerido — só mostra se houver algum custo preenchido
+  const temCusto = produto > 0 || embalagem > 0 || outros > 0 || cfUnit > 0;
+  if (temCusto) {
+    const precoSugerido = resolverPrecoIdeal(custoBase, impostosPct, config.margem, 0);
+    if (isFinite(precoSugerido) && precoSugerido > 0) {
+      const sugEl = document.getElementById('r_preco_sugerido');
+      sugEl.textContent = R$(precoSugerido);
+      // color will be applied after tier is calculated below
+      const { pct: cpS, fixo: cfS } = shopeeComissao(precoSugerido);
+      const assS   = precoSugerido * PCT_ASSESSO;
+      const lucroS = precoSugerido - custoBase - (precoSugerido*cpS+cfS) - precoSugerido*PCT_PUB - assS - precoSugerido*(impostosPct/100);
+      document.getElementById('r_preco_sug_sub').textContent =
+        `Lucro: ${R$(lucroS)} · Margem: ${pct(lucroS/precoSugerido)}`;
+    }
+  } else {
+    document.getElementById('r_preco_sugerido').textContent  = '—';
+    document.getElementById('r_preco_sug_sub').textContent   = 'Informe os custos';
+  }
+
+  // precoFinal = sempre o preço manual (acima já bloqueamos se vazio)
+  const precoFinal = precoManual;
+
+  if (!isFinite(precoFinal) || precoFinal <= 0) return;
+
+  const { pct: cp, fixo: cf } = shopeeComissao(precoFinal);
+  const comissaoVal  = precoFinal * cp + cf;
+  const pubVal       = precoFinal * PCT_PUB;
+  const assessoriaVal= precoFinal * PCT_ASSESSO;
+  const impostoVal   = precoFinal * (impostosPct / 100);
+  const totalTaxas   = comissaoVal + pubVal + assessoriaVal + impostoVal;
+  const lucroReal    = precoFinal - custoBase - totalTaxas;
+  const margemReal   = lucroReal / precoFinal;
+
+  // Tier color based on the MANUAL PRICE margem
+  const tierColor = margemReal < 0 ? 'var(--red)'
+    : margemReal < 0.10 ? 'var(--orange)'
+    : margemReal < 0.15 ? 'var(--yellow)'
+    : 'var(--green)';
+
+  // Preço de Venda — cor do indicador (mesma lógica da margem real)
+  const manualEl  = document.getElementById('r_preco_manual');
+  const manualSub = document.getElementById('r_preco_manual_sub');
+  manualEl.textContent  = R$(precoFinal);
+  manualEl.className    = 'result-value';
+  manualEl.style.color  = tierColor;
+  manualSub.textContent = '';
+
+  // Preço Sugerido — cor baseada na margem DO SUGERIDO (sempre >= margem alvo = verde/amarelo)
+  const sugEl = document.getElementById('r_preco_sugerido');
+  if (sugEl && sugEl.textContent !== '—') {
+    const sugMargem = config.margem / 100;
+    const sugColor = sugMargem < 0 ? 'var(--red)'
+      : sugMargem < 0.10 ? 'var(--orange)'
+      : sugMargem < 0.15 ? 'var(--yellow)'
+      : 'var(--green)';
+    sugEl.style.color = sugColor;
+  }
+
+  const lucroEl = document.getElementById('r_lucro');
+  lucroEl.textContent  = R$(lucroReal);
+  lucroEl.className    = 'result-value';
+  lucroEl.style.color  = tierColor;
+
+  const margemEl = document.getElementById('r_margem_real');
+  margemEl.textContent = pct(margemReal);
+  margemEl.className   = 'result-value';
+  margemEl.style.color = tierColor;
+
+  // Meter: 0-100% mapped to 0-30% margem range for visual clarity
+  const meterPct = Math.max(0, Math.min(100, (margemReal / 0.30) * 100));
+  const fill = document.getElementById('meter-fill');
+  fill.style.width = meterPct + '%';
+  fill.style.background = tierColor;
+  document.getElementById('meter-pct').textContent = pct(margemReal);
+
+  document.getElementById('r_detalhamento').innerHTML =
+    detalheCard('Produto',                                              R$(produto),       'var(--text)') +
+    detalheCard('Embalagem',                                            R$(embalagem),     'var(--text)') +
+    (outros > 0 ? detalheCard('Outros Custos',                          R$(outros),        'var(--text)') : '') +
+    (cfUnit > 0 ? detalheCard('Custo Fixo',                             R$(cfUnit),        'var(--text)') : '') +
+    detalheCard(`Assessoria em Marketplace (${config.assessoriaPct}%)`, R$(assessoriaVal), 'var(--text)') +
+    (config.tipoPessoa === 'PJ' ? detalheCard(`Imposto (${impostosPct}%)`, R$(impostoVal), 'var(--text)') : '') +
+    detalheCard(`Publicidade (${config.publicidadePct}%)`,              R$(pubVal),        'var(--text)') +
+    detalheCard(`Shopee (${(cp*100).toFixed(0)}% + R$${cf})`,          R$(comissaoVal),   'var(--text)');
+}
+
+/* ===== FIREBASE HELPERS & INIT LOADER ===== */
+
+// Converte um produto para formato salvo no Firestore (só campos primitivos)
+function produtoParaFb(r) {
+  return {
+    nome: r.nome, sku: r.sku,
+    custo: r.custo, embalagem: r.embalagem || 0,
+    outros: r.outros || 0, preco: r.preco
+  };
+}
+
+// Quando o Firebase estiver pronto, carrega dados salvos e sobrescreve defaults
+window.addEventListener('firebase-ready', async () => {
+  // 1. Carrega configurações
+  const cfgSalva = await window._fb.fbCarregarConfig();
+  if (cfgSalva) {
+    if (cfgSalva.tipoPessoa)     config.tipoPessoa     = cfgSalva.tipoPessoa;
+    if (cfgSalva.margem != null) config.margem         = cfgSalva.margem;
+    if (cfgSalva.publicidadePct != null) config.publicidadePct = cfgSalva.publicidadePct;
+    if (cfgSalva.custoFixoTotal != null) config.custoFixoTotal = cfgSalva.custoFixoTotal;
+    if (cfgSalva.qtdVendidos != null)    config.qtdVendidos    = cfgSalva.qtdVendidos;
+    if (cfgSalva.impostos != null)       config.impostos       = cfgSalva.impostos;
+    config.custoFixoUnit = config.custoFixoTotal / (config.qtdVendidos || 1);
+
+    // Aplica nas configs UI
+    const cfgMargem = document.getElementById('cfg_margem');
+    const cfgMargemInput = document.getElementById('cfg_margem_input');
+    const cfgPub = document.getElementById('cfg_publicidade');
+    const cfgCF  = document.getElementById('cfg_custo_fixo');
+    const cfgQtd = document.getElementById('cfg_qtd_vendidos');
+    const cfgImp = document.getElementById('cfg_impostos_pct');
+    if (cfgMargem) cfgMargem.value = config.margem;
+    if (cfgMargemInput) cfgMargemInput.value = config.margem;
+    if (cfgPub) cfgPub.value = config.publicidadePct;
+    if (cfgCF)  cfgCF.value  = config.custoFixoTotal;
+    if (cfgQtd) cfgQtd.value = config.qtdVendidos;
+    if (cfgImp && config.tipoPessoa === 'PJ') cfgImp.value = config.impostos;
+
+    selecionarTipo(config.tipoPessoa);
+  }
+
+  // 2. Carrega produtos
+  const prodsSalvos = await window._fb.fbCarregarProdutos();
+  if (prodsSalvos && prodsSalvos.length > 0) {
+    rawData.length = 0; // limpa os dados de exemplo
+    prodsSalvos.forEach(p => {
+      const novo = {
+        nome: p.nome, sku: p.sku || '—',
+        custo: p.custo || 0, embalagem: p.embalagem || 0,
+        outros: p.outros || 0, preco: p.preco || 0,
+        icms:0, ipi:0, qtd:1, sugerido:0,
+        lucroBruto:0, margemBruta:0, taxaAnuncio:0.2,
+        comissao:0, pub:0, assessoria:0, imposto:0, lucro:0, margemLucro:0,
+        precoBaixo:null, precoMedio:null
+      };
+      recalcProduto(novo);
+      rawData.push(novo);
+    });
+  }
+
+  // 3. Rebuilda tudo com dados carregados
+  atualizarTabelaComissao();
+  atualizarCalcPreview();
+  buildDashboard();
+  buildTable();
+  calcPreco();
+});
+
+/* ===== INIT ===== */
+rawData.forEach(r => recalcProduto(r));
+atualizarTabelaComissao();
+atualizarCalcPreview();
+buildDashboard();
+buildTable();
+calcPreco();
+</script>
+</body>
+</html>
